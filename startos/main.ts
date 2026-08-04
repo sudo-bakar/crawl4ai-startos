@@ -37,7 +37,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
   // service never reaches `ready`. The full Chromium binary accepts
   // --headless=new, so a symlink from the expected path to the existing
   // binary is sufficient. Remove this workaround when a fixed image ships.
-  const crawl4aiSub = await sdk.SubContainer.of(
+  const crawl4aiSub = await sdk.SubContainer.eager(
     effects,
     { imageId: 'crawl4ai' },
     mounts,
@@ -60,7 +60,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
       // not mounted, so the baked-in appuser-owned directory is already
       // correct.
       .addOneshot('fix-permissions', {
-        subcontainer: await sdk.SubContainer.of(
+        subcontainer: sdk.SubContainer.of(
           effects,
           { imageId: 'crawl4ai' },
           mounts,

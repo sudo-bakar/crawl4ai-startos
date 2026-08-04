@@ -43,9 +43,9 @@ Upstream project: <https://github.com/unclecode/crawl4ai>
 |---|---|
 | Image source | Upstream `unclecode/crawl4ai` Docker image, unmodified |
 | Architectures | `x86_64`, `aarch64` |
-| Entrypoint | Upstream `bash entrypoint.sh` is run as PID 1 (`sdk.useEntrypoint()` + `runAsInit: true`). It resolves the gunicorn bind from `CRAWL4AI_API_TOKEN`, generates an ephemeral Redis password if absent, then `exec`s `supervisord -c supervisord.conf`. |
+| Entrypoint | Upstream `bash entrypoint.sh` is run as PID 1 (`sdk.useEntrypoint()` + `runAsInit: true`). It resolves the gunicorn bind from `CRAWL4AI_API_TOKEN`, generates an ephemeral Redis password if absent, then `exec`s `supervisord -c supervisord.conf --pidfile /tmp/supervisord.pid`. |
 | Init system | supervisord (foreground, `nodaemon=true`) manages gunicorn + the in-container Redis |
-| Runtime user | `appuser` (the image's `USER appuser` directive, an unprivileged system account) |
+| Runtime user | `appuser` (UID/GID `999`, a system user created with `groupadd -r appuser && useradd --no-log-init -r -g appuser appuser`). The image's `USER appuser` directive, an unprivileged system account. |
 
 The image pins an in-container Redis (loopback-only, password-protected) for
 its job queue. Its port (6379) is never published and is not exposed by this
@@ -56,18 +56,34 @@ package.
 | Volume | Subpath → Mount point | Purpose |
 |---|---|---|
 | `main` | `outputs` → `/var/lib/crawl4ai/outputs` | Screenshot / PDF artifact store (mode `0700`, `appuser`-owned) |
-| `main` | `cache` → `/home/appuser/.cache` | Playwright Chromium browser binaries (hundreds of MB) |
 | `main` | `store.json` (root of volume) | Package-internal JSON file holding the auto-generated API token |
 
-A `fix-permissions` oneshot runs as `root` before the main daemon starts on
-every start, restoring ownership of the two mounted subpaths to `appuser`. The
-StartOS volume root is owned by the container's `root`, but the image's runtime
-expects those directories to belong to `appuser` — without this oneshot the
-server cannot write artifacts or re-use the cached browser binaries after a
-restart.
+The Playwright Chromium binary is **baked into the Docker image** at
+`/home/appuser/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`
+(appuser-owned) and is deliberately **not** mounted as a volume. Mounting a
+volume subpath at `/home/appuser/.cache` would shadow that baked-in binary
+with an empty directory, causing `BrowserType.launch: Executable doesn't
+exist` and a gunicorn worker-boot failure. Since the image bundles Chromium,
+there is nothing to persist or re-download; it is present on every boot.
 
-Redis data (`/var/lib/redis`, `/var/log/redis`) is intentionally **not**
-mounted — it is ephemeral and regenerated each restart by the entrypoint.
+The 0.9.1 image ships a regression: it bakes the full `chromium-1228` binary
+but Playwright in 0.9.1 looks for the separate `chromium_headless_shell-1228`
+binary, which upstream forgot to `playwright install`. This package patches
+the daemon's subcontainer rootfs before startup, symlinking the missing
+`chrome-headless-shell` path to the existing full Chromium binary (which
+accepts `--headless=new`). The symlink is created in `setupMain` on every
+boot — no volume or persisted state is involved. Remove this workaround when
+a fixed upstream image ships.
+
+A `fix-permissions` oneshot runs as `root` before the main daemon starts on
+every start, restoring ownership of the mounted `outputs` subpath to
+`appuser`. The StartOS volume subpath lands owned by the container's `root`,
+but the image's runtime expects `outputs/` to belong to `appuser` — without
+this oneshot the server cannot write artifacts after a restart.
+
+Redis persistence is enabled (RDB snapshots write to `/var/lib/redis`,
+writable by `appuser`) but `/var/lib/redis` is intentionally not mounted as
+a volume — the data is ephemeral and discarded each restart.
 
 ## Installation and First-Run Flow
 
@@ -95,6 +111,7 @@ and the new token replaces the old one.
 |---|---|
 | `CRAWL4AI_API_TOKEN` env var (auto-generated, persisted in `store.json`, read reactively by `setupMain`) | `/app/config.yml` (baked into the image, not mounted) |
 | HTTP interface port (`11235` → external `80` via the StartOS proxy) | LLM provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) — not yet wired through StartOS; see [Limitations](#limitations-and-differences) |
+| | Feature opt-ins such as `CRAWL4AI_EXECUTE_JS_ENABLED` and `CRAWL4AI_HOOKS_ENABLED` — not exposed by this package |
 
 The upstream `config.yml` is left untouched. Its `security.trusted_hosts:
 ["*"]` accepts any Host header the StartOS proxy injects, and
@@ -109,17 +126,56 @@ the baked-in default is already correct once the token is set.
 
 | Interface | Internal port | External port | Protocol | Purpose |
 |---|---|---|---|---|
-| `web` | `11235` | `80` (preferred) | HTTP | Single surface for playground UI, REST API, monitor, and MCP endpoints |
+| `web` | `11235` | `80` (preferred; dynamically assigned if taken) | HTTP | Single surface for playground UI, REST API, dashboard, and MCP endpoints. The StartOS "Open" button lands on `/playground`. |
 
-Reaching the API at `https://<startos-host>.local/crawl4ai/...` works for
-every endpoint. The `/playground`, `/monitor`, `/crawl`, `/screenshot`,
-`/pdf`, `/execute_js`, `/md`, `/llm`, `/schema`, `/health`, `/metrics`,
-`/hooks/info`, the monitor WebSocket `/monitor/ws`, and the MCP endpoints
-`/mcp/sse` + `/mcp/ws` all live on the single port.
+All endpoints (`/playground`, `/dashboard`, `/crawl`, `/screenshot`, `/pdf`,
+`/execute_js`, `/md`, `/llm`, `/schema`, `/health`, `/metrics`, `/hooks/info`,
+the monitor WebSocket `/monitor/ws`, and the MCP endpoints `/mcp/sse` +
+`/mcp/ws`) live on the single port at the **root** of the service address.
 
-The MCP server URL is `https://<startos-host>.local/crawl4ai/mcp/sse?token=<token>`
-when pointed at an MCP client that can't set headers (the `?token=` query
-form is supported by upstream's 0.9.0 migration guide).
+The base URL depends on how StartOS assigned the external port: if port 80 was
+available, the service is reverse-proxied on the dashboard host under the
+`/crawl4ai/` path prefix (e.g. `https://<host>.local/crawl4ai/playground`); if
+port 80 was taken, StartOS assigns a dedicated external port and serves the
+service at the root of its own `host:port` address (e.g.
+`https://<host>:<port>/playground`) with no path prefix. The exact address is
+shown on the service's StartOS dashboard page — use that as the base URL and
+append the endpoint paths from this document.
+
+The MCP server is exposed on the single `web` interface under `/mcp/…`. Two
+transports are present, with **different credential requirements**:
+
+| Transport | Path | Auth |
+|---|---|---|
+| SSE | `/mcp/sse` (GET stream) + `/mcp/messages/?session_id=…` (JSON-RPC POST) | `Authorization: Bearer <token>` header |
+| WebSocket | `/mcp/ws` | `?token=<token>` query **or** `Authorization: Bearer` header |
+
+The `?token=` query form is honored **only on the WebSocket transport**.
+Upstream's `AuthGate` (`auth_gate.py:_extract_token`) keys `?token=` extraction
+behind `scope["type"] == "websocket"`, so an HTTP request to `/mcp/sse` carrying
+`?token=` instead of a Bearer header is rejected with `401` before the SSE
+stream opens — the client then hangs to its call timeout. The 0.9.0 migration
+guide scopes `?token=…` to "WebSocket clients (MCP, monitor) that can't set
+headers", not to the SSE path.
+
+Accordingly, an SSE MCP client **must** send `Authorization: Bearer <token>` on
+both the GET stream and the JSON-RPC POST; the package does not (and cannot)
+relay a `?token=` query into a header for HTTP. Clients that genuinely cannot
+set headers must use `/mcp/ws?token=<token>`.
+
+The SSE transport is a dual-flow design: the JSON-RPC reply to a POST
+(initialize / tools/list / call) is delivered **back over the open GET SSE
+stream**, not in the POST's `202` response. The GET stream must stay open for
+the session's lifetime — if it closes, the MCP SDK pops the session and further
+POSTs to `/mcp/messages/?session_id=…` return `404 "Could not find session"`
+(per `mcp.server.sse.SseServerTransport.handle_post_message`; gunicorn runs
+`--workers 1` so this is not a multi-worker affinity issue). There is no
+streamable-HTTP `/mcp` endpoint in crawl4ai `0.9.0` or current `main` — only
+`/mcp/sse` and `/mcp/ws` are mounted (`mcp_bridge.py:252,197`).
+
+The reverse-proxy path prefix depends on how the interface is reached: via the
+StartOS dashboard host the service is mounted under `/crawl4ai/…`, while the
+interface's dedicated external host:port serves it at root (`/mcp/sse`).
 
 ## Actions (StartOS UI)
 
@@ -129,19 +185,18 @@ form is supported by upstream's 0.9.0 migration guide).
 
 ## Backups and Restore
 
-The entire `main` volume is backed up — that captures both `outputs/`
-(screenshots / PDFs the user expects to keep) and `cache/` (the Playwright
-Chromium binaries, ~500 MB). If `cache/` bloats backups unacceptably, a
-follow-up release can switch to incremental rsync excluding `cache/`
-(`recipe-backups.md`). `store.json` (the API token) lives at the volume root
-and is restored with it, so a restored-from-backup install keeps the same
-token.
+The entire `main` volume is backed up — that captures `outputs/`
+(screenshots / PDFs the user expects to keep) and `store.json` (the API token
+at the volume root, so a restored-from-backup install keeps the same token).
+The Playwright Chromium binary is **not** part of any volume: it lives in the
+Docker image's read-only layer, so it adds nothing to backup size and is
+restored automatically whenever the image is present.
 
 ## Health Checks
 
 | Check | Endpoint | Notes |
 |---|---|---|
-| Daemon `ready` | `GET http://localhost:11235/health` | `200 OK` with `{"status":"healthy",...}`. Upstream's `/health` is exempt from auth. The StartOS `checkWebUrl` helper is used (more precise than `checkPortListening`). |
+| Daemon `ready` | `GET http://localhost:11235/health` | `200 OK` with `{"status":"ok",...}`. Upstream's `/health` is exempt from auth. The StartOS `checkWebUrl` helper is used (more precise than `checkPortListening`). |
 
 The upstream Dockerfile's own `HEALTHCHECK` additionally asserts
 `free -m >= 2048` and `redis-cli ping`; StartOS does not replicate these in
@@ -154,18 +209,23 @@ None.
 
 ## Limitations and Differences
 
-1. **LLM provider API keys are not yet configurable.** The `/md` and `/llm`
-   extraction endpoints (and any LLM-tagged `LLM_PROVIDER` / `LLM_BASE_URL`
-   behaviours) return an error until provider keys are present in the
-   container's environment. All non-LLM endpoints (`/crawl`, `/html`,
-   `/screenshot`, `/pdf`, `/execute_js`, `/playground`) work without keys. A
-   follow-up release will add a config action for pasting LLM provider keys.
-2. **Rate-limit trusted-proxies not configured.** Upstream's
+1. **LLM provider API keys are not yet configurable.** The `/llm` endpoint and
+   LLM-backed extraction require a provider key. In the pinned server's `/md`
+   implementation, only `f: "raw"` avoids provider resolution; `fit`, `bm25`,
+   and `llm` may fail without a configured provider even though the underlying
+   fit and BM25 filters are LLM-free. A follow-up release should expose
+   provider configuration and retest each mode.
+2. **JavaScript execution and declarative crawl hooks are disabled.** Upstream
+   requires `CRAWL4AI_EXECUTE_JS_ENABLED=true` and
+   `CRAWL4AI_HOOKS_ENABLED=true` respectively. This package does not expose
+   those opt-ins, so `/execute_js` and crawl requests containing hooks return
+   `403`. `/hooks/info` remains available and authenticated.
+3. **Rate-limit trusted-proxies not configured.** Upstream's
    `rate_limiting.trusted_proxies: []` is left empty, so rate limiting keys
    on the StartOS proxy IP (`10.0.3.1`) rather than each real client. Rate
    limiting still functions; v2 can mount a `config.yml` override listing
    `10.0.3.1` for correct per-client accounting.
-3. **`icon.svg` ships an embedded raster.** Upstream has no vector form of
+4. **`icon.svg` ships an embedded raster.** Upstream has no vector form of
    the Crawl4AI logo — the StartOS icon embeds the upstream 32×32 PNG
    (`deploy/docker/static/assets/crawl4ai-logo.png`) inside an SVG
    `<image>`. There is no fabricated vector artwork.
@@ -197,7 +257,8 @@ architectures:
   - x86_64
   - aarch64
 volumes:
-  main: /var/lib/crawl4ai/outputs (and /home/appuser/.cache)
+  main: /var/lib/crawl4ai/outputs
+# Note: Playwright Chromium is baked into the image (not a mounted volume)
 ports:
   web: 11235
 dependencies: []

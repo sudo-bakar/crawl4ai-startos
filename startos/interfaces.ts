@@ -18,7 +18,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     masked: false,
     schemeOverride: null,
     username: null,
-    path: '',
+    path: '/playground',
     query: {},
   })
 

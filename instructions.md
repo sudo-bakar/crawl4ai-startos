@@ -3,7 +3,7 @@
 ## Documentation
 
 - [Crawl4AI self-hosting guide](https://docs.crawl4ai.com/core/self-hosting/) — how the Docker server is configured upstream and what each endpoint does.
-- [Model Context Protocol on Crawl4AI](https://docs.crawl4ai.com/api/mcp) — pointing an MCP client at the server's `/mcp/sse` endpoint.
+- [Model Context Protocol on Crawl4AI](https://docs.crawl4ai.com/core/self-hosting/#what-is-mcp) — pointing an MCP client at the server's `/mcp/sse` endpoint.
 - [Upstream README](https://github.com/unclecode/crawl4ai#readme) — feature overview and quick-start.
 
 ## What you get on StartOS
@@ -11,61 +11,78 @@
 Crawl4AI on StartOS runs the upstream Docker server behind the StartOS reverse
 proxy. You get a single web address that serves:
 
-- `/playground` — interactive playground for ad-hoc crawls and LLM extractions.
-- `/monitor` — real-time monitor for active crawls, queues, and stats.
+- `/playground` — interactive playground for ad-hoc crawls, screenshots, PDFs,
+  and Markdown extraction.
+- `/dashboard` — real-time monitor for active crawls, queues, and stats.
 - `/crawl`, `/html`, `/screenshot`, `/pdf`, `/execute_js`, `/md`, `/llm`,
-  `/schema`, `/health`, `/metrics`, `/hooks/info` — the REST API surface.
+  `/schema`, `/health`, `/metrics`, `/hooks/info` — the REST API surface, with
+  the current package limitations noted below.
 - `/mcp/sse` and `/mcp/ws` — Model Context Protocol endpoints for direct
   integration with tools like Claude Code.
 
 Crawled artifacts (screenshots, PDFs) persist across restarts in the `main`
-volume, and the Playwright Chromium cache persists too so the browser does not
-re-download on every restart.
+volume. The Playwright Chromium browser is bundled inside the Docker image,
+so it is available on every start with no download.
 
 ## Getting set up
+
+> **`<service-base>`** below means the **Web Interface** URL shown by StartOS
+> with the final `/playground` removed. Keep its scheme, hostname, optional
+> port, and any preceding path. Append endpoint paths such as `/crawl`,
+> `/mcp/sse`, or `/health` to that base.
 
 1. Open the service from your **Dashboard** and find the **Set API Token**
    critical task. Click it, then click **Run**.
 2. Copy the masked **Token** value that comes back. You will need it for every
    API and MCP call. The token is shown once — if you lose it, run the action
    again to rotate it.
-3. The service restarts automatically with the token applied and the web
-   interface will report **running** once `https://<startos-host>.local/crawl4ai/health`
-   responds `{"status":"healthy"}`.
-4. Open `https://<startos-host>.local/crawl4ai/playground` in a browser to
-   confirm the playground loads (the upstream `trusted_hosts` is `["*"]`, so
-   the StartOS-injected Host header is accepted).
+3. The service restarts automatically with the token applied. Wait for the
+   **Web Interface** health check to report that it is ready.
+4. Confirm the token works by requesting the authenticated hooks-information
+   endpoint:
+
+   ```bash
+   curl -H "Authorization: Bearer <your-token>" \
+     <service-base>/hooks/info
+   ```
+
+   A valid token returns the available declarative hook actions. `GET /health`
+   is public and can confirm readiness, but it does not validate your token.
 
 ## Using Crawl4AI
 
 ### Web interface
 
-Bookmark `https://<startos-host>.local/crawl4ai/playground` for interactive
-testing of crawl, screenshot, PDF, and JavaScript-execution endpoints. Open
-`/monitor` alongside it to watch active crawls in real time.
+Open the **Web Interface** to reach the playground. It provides an interactive
+UI for crawl, screenshot, PDF, and Markdown endpoints. Paste your API token
+into the token field before making requests. The dashboard at
+`<service-base>/dashboard` uses the same token.
 
 ### REST API
 
-Send `Authorization: Bearer <token>` on every request except `GET /health`. A
-minimal crawl looks like:
+Send `Authorization: Bearer <token>` on every API request except `GET /health`.
+A minimal crawl looks like:
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <your-token>" \
   -H "Content-Type: application/json" \
   -d '{"urls":["https://example.com"]}' \
-  https://<startos-host>.local/crawl4ai/crawl
+  <service-base>/crawl
 ```
 
 ### MCP integration
 
-Point an MCP-compatible client (Claude Code, Cursor, etc.) at:
+Crawl4AI exposes two MCP transports on the same port:
 
-```
-https://<startos-host>.local/crawl4ai/mcp/sse?token=<your-token>
-```
+| Transport | URL | How the client authenticates |
+|---|---|---|
+| **SSE** | `<service-base>/mcp/sse` | `Authorization: Bearer <your-token>` header on **both** the GET stream and the JSON-RPC POST |
+| **WebSocket** | Use the same host and path `<service-base>/mcp/ws`, with the WebSocket scheme (`ws` or `wss`) | `?token=<your-token>` query works here, or the `Authorization: Bearer` header |
 
-The `?token=` query form is supported for clients that cannot set headers.
+For SSE, configure your MCP client to send the Bearer header. Do not append
+`?token=` to the SSE URL; query-token authentication works only with WebSocket.
+If your client cannot set HTTP headers, use the WebSocket transport instead.
 
 ### Actions
 
@@ -75,10 +92,10 @@ The `?token=` query form is supported for clients that cannot set headers.
 
 ## Limitations
 
-The `/md` and `/llm` extraction endpoints (and any LLM-backed behaviour
-controlled via `LLM_PROVIDER` / `LLM_BASE_URL`) return an error until an LLM
-provider API key is present in the environment. Provider-key configuration is
-not yet surfaced through StartOS — set it inside the upstream container
-directly for now, or wait for a follow-up release that adds a config action
-for it. All non-LLM endpoints (`/crawl`, `/html`, `/screenshot`, `/pdf`,
-`/execute_js`, `/playground`) work without any LLM key.
+- LLM provider credentials are not configurable in this package. The `/llm`
+  endpoint, LLM extraction, and the `fit`, `bm25`, and `llm` modes of `/md`
+  may fail without a provider key. Use `/md` with `{"f":"raw"}` for Markdown
+  generation that does not require an LLM provider.
+- `/execute_js` and declarative crawl hooks are disabled because their upstream
+  opt-in settings are not exposed by this package. The `/hooks/info` endpoint
+  remains available for authentication checks and schema inspection.

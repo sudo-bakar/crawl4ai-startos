@@ -58,8 +58,13 @@ Then:
   - The user is still `appuser` (`USER appuser` at end of Dockerfile) and the
     `chown -R appuser:appuser` targets in `main.ts`'s `fix-permissions`
     oneshot are still correct.
-  - `/var/lib/crawl4ai/outputs` and `/home/appuser/.cache` are still the
-    persistent data paths.
+  - `/var/lib/crawl4ai/outputs` is still the persistent artifact path. Note:
+    Playwright Chromium is **not** mounted from the volume — it is baked into
+    the image at `/home/appuser/.cache/ms-playwright/`. Do NOT re-add a volume
+    mount at `/home/appuser/.cache`; it would shadow the baked-in binary and
+    break the web UI. Only re-introduce a cache mount if a future image stops
+    baking Chromium (and then prefer an oneshot running
+    `playwright install chromium` rather than masking the path).
 - If those have changed, update `main.ts` (`CRAWL4AI_API_TOKEN` env var,
   mounts, oneshot chown targets) and `interfaces.ts` (port) accordingly.
 - Re-run `make` (which runs `tsc` and `start-cli s9pk pack`), install on a

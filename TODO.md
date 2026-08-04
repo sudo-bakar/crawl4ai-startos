@@ -9,23 +9,55 @@ and were deliberately postponed.
 - [ ] Install on a real StartOS box and exercise the §6 checklist in
       `../CRAWL4AI_PLAN.md` (token critical task surfaces, health passes,
       `/playground` loads, `/crawl` POST returns a successful crawl with the
-      bearer token, `/health` reachable without auth, `/monitor` loads,
-      restart preserves `outputs/` + `cache/`, backup → uninstall → restore
+      bearer token, `/health` reachable without auth, `/dashboard` loads,
+      restart preserves `outputs/`, backup → uninstall → restore
       preserves artifacts). Per AGENTS.md, a clean `tsc` + `s9pk pack` does
       NOT prove the service runs.
-- [ ] Confirm the actual numeric UID of `appuser` inside the running image
-      (`start-cli package attach crawl4ai -n crawl4ai-sub -- id -u appuser`).
-      The `fix-permissions` oneshot chowns by name (`appuser:appuser`) so the
-      exact UID does not matter for correctness, but record it for future
-      reference if a name-based chown ever breaks (e.g. a slim image without
-      `getent`).
-- [ ] After the first real backup, measure the `cache/` (Playwright Chromium
-      binaries, ~500 MB) contribution to backup size. If it bloats backups
-      unacceptably, switch `startos/backups.ts` to incremental rsync that
-      excludes `cache/` (see `recipe-backups.md` — `sdk.Backups.of().addSync`).
+- [x] **Verified:** `appuser` is UID `999` / GID `999` (system user, created
+      with `-r`). `PYTHON_ENV=production` is baked into the image. The
+      `fix-permissions` oneshot chowns by name (`appuser:appuser`) so the
+      numeric UID never affects correctness — keep that.
+- [x] **Resolved:** the `cache` volume mount was removed in `0.9.0:1`.
+      Mounting `/home/appuser/.cache` shadowed the baked-in Playwright
+      Chromium binary and broke the web UI. Chromium is now served from the
+      image's read-only layer on every boot, so it adds nothing to backup
+      size — the backup-bloat concern that used to be tracked here no longer
+      applies.
 
 ## Future v2 work
 
+- [ ] **MCP SSE transport behind the StartOS proxy — needs runtime verification.**
+      An end-to-end MCP handshake (`initialize` → `tools/list` over the GET SSE
+      stream, JSON-RPC POST to `/mcp/messages/?session_id=…` answered on the
+      GET stream) has NOT been exercised through the StartOS reverse proxy.
+      Code-only findings so far (verified against
+      `unclecode/crawl4ai:0.9.0`, `mcp` Python SDK, and the Rust hyper proxy in
+      `start-core/src/net/http.rs`):
+        - gunicorn runs `--workers 1` (supervisord.conf). The "session
+          affinity broken across workers" theory is FALSE.
+        - The MCP SDK pops the session from its in-memory dict the instant the
+          GET `/mcp/sse` stream closes (`sse.py` `finally`). The `404 "Could
+          not find session"` seen in two-step curl probes (GET → close → POST)
+          is therefore a **test artifact**, not a server bug.
+        - The proxy streams response bodies through unbuffered (`box_incoming`)
+          and does not kill active streams (`header_read_timeout` is disarmed
+          while a body/upgrade is in flight). Its HTTP/1.1 path uses a single
+          shared upstream `SendRequest` guarded by a `Mutex`; whether a client
+          that reuses one TCP connection for the GET stream and the POST could
+          stall under that single-connection serialization has not been
+          reproduced with a real client.
+      Action when a StartOS box and a working MCP client (Hermes/SSE, or a WS
+      client) are available: run `curl -v` against `/mcp/sse` to record the
+      negotiated HTTP version, confirm `?token=` → `401` and Bearer → `200`,
+      then drive a full `initialize` + `tools/list` round trip and confirm the
+      responses actually arrive over the SSE stream inside the client's timeout.
+      If a real client (e.g. Hermes) still times out with a correct Bearer
+      header, capture the proxy→upstream HTTP version and connection reuse.
+- [ ] Track upstream for a streamable-HTTP `/mcp` endpoint. As of crawl4ai
+      `main`, `mcp_bridge.attach_mcp` mounts only `/mcp/sse` (SSE) and `/mcp/ws`
+      (WebSocket) — there is no streamable-HTTP transport. If/when upstream adds
+      one, recommend it as the primary MCP transport: request/response over a
+      single connection avoids the SSE dual-flow fragility entirely.
 - [ ] LLM-provider API-key config action(s). Add a config action (or several)
       that lets the user paste `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
       `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `TOGETHER_API_KEY`,
@@ -47,3 +79,14 @@ and were deliberately postponed.
 - [ ] Consider JWT mode (`CRAWL4AI_JWT_ENABLED=true`) instead of the static
       token, for multi-user scenarios. Requires a `SECRET_KEY` and
       `security.jwt_enabled: true` in `config.yml`.
+- [ ] Investigate making `/playground` browser-accessible. Upstream 0.9.0 is
+      secure-by-default and auth-gates the playground HTML page itself (the
+      `?token=` query form works only for WebSocket/MCP clients, not HTTP page
+      loads). A plain browser navigation to
+      `https://<host>/crawl4ai/playground` returns `401` because the browser
+      cannot send `Authorization: Bearer <token>` on a page load. The current
+      stopgap (documented in `instructions.md`) is a header-injection browser
+      extension or an API client. A real fix likely requires an upstream
+      change (cookie auth, a login form, or a `?token=` path for the HTML page)
+      or a reverse-proxy header-injection layer; the `config.yml` `security`
+      section exposes no path-exemption option.

@@ -82,21 +82,19 @@ and were deliberately postponed.
       so the override must be a complete valid config — copy the upstream
       default and only change the `trusted_proxies` line. File-model this as
       `FileHelper.yaml` (see `file-models.md`).
-- [ ] Replace the embedded PNG in `icon.svg` with a vector SVG if/when
-      upstream ships one. Currently `icon.svg` embeds the upstream 32×32 PNG
-      (`deploy/docker/static/assets/crawl4ai-logo.png`) inside an SVG
-      `<image>` element, since upstream has no vector form of the logo.
+- [x] **Icon replaced with a vector SVG (2026-08).** `icon.svg` is now a
+      512×512 path-based vector with no embedded raster (the previous `<image>`
+      wrap of the upstream 32×32 PNG is gone). Provenance of the vector is
+      unrecorded — if upstream ever ships an official vector logo, prefer it.
 - [ ] Consider JWT mode (`CRAWL4AI_JWT_ENABLED=true`) instead of the static
       token, for multi-user scenarios. Requires a `SECRET_KEY` and
       `security.jwt_enabled: true` in `config.yml`.
-- [ ] Investigate making `/playground` browser-accessible. Upstream 0.9.0 is
-      secure-by-default and auth-gates the playground HTML page itself (the
-      `?token=` query form works only for WebSocket/MCP clients, not HTTP page
-      loads). A plain browser navigation to
-      `https://<host>/crawl4ai/playground` returns `401` because the browser
-      cannot send `Authorization: Bearer <token>` on a page load. The current
-      stopgap (documented in `instructions.md`) is a header-injection browser
-      extension or an API client. A real fix likely requires an upstream
-      change (cookie auth, a login form, or a `?token=` path for the HTML page)
-      or a reverse-proxy header-injection layer; the `config.yml` `security`
-      section exposes no path-exemption option.
+- [x] **Resolved: `/playground` no longer needs a header-injection workaround
+      (2026-08).** Upstream 0.9.x now serves the playground HTML **without**
+      auth-gating the page (`GET /playground` → 307 → `200` HTML). The page
+      carries a client-side token bar that stores the token in `sessionStorage`
+      and attaches `Authorization: Bearer <token>` per request — so a plain
+      browser navigation works once the user pastes the API token into the bar.
+      No browser extension or API-client-only fallback is required. Doc updates
+      in `instructions.md` already describe pasting the token into the token
+      field.

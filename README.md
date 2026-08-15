@@ -259,10 +259,12 @@ None.
    on the StartOS proxy IP (`10.0.3.1`) rather than each real client. Rate
    limiting still functions; v2 can mount a `config.yml` override listing
    `10.0.3.1` for correct per-client accounting.
-4. **`icon.svg` ships an embedded raster.** Upstream has no vector form of
-   the Crawl4AI logo — the StartOS icon embeds the upstream 32×32 PNG
-   (`deploy/docker/static/assets/crawl4ai-logo.png`) inside an SVG
-   `<image>`. There is no fabricated vector artwork.
+4. **`icon.svg` is a locally-created vector, not an upstream asset.** Upstream
+   ships no vector form of the Crawl4AI logo (`deploy/docker/static/assets/
+   crawl4ai-logo.png` is a 32×32 PNG), so this package's `icon.svg` is a
+   512×512 path-based vector (no embedded raster). Its exact provenance is
+   unrecorded — treat it as a local rendering of the upstream logo unless
+   upstream ships an official vector to prefer.
 5. **Screenshot / PDF artifacts expire after 1 hour and the TTL is not
    configurable.** This is upstream's default
    (`CRAWL4AI_ARTIFACT_TTL_SECONDS=3600`), not a package choice, but the

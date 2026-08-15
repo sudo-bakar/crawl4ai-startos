@@ -11,7 +11,7 @@ const dict = {
   'Generate or rotate the Crawl4AI API token. Required for the server to bind a non-loopback interface so StartOS can reach it.': 5,
   'API Token': 6,
   'Use this token as `Authorization: Bearer <token>` on every API request. The service restarts automatically to pick up the new token.': 7,
-  'Token': 8,
+  Token: 8,
   // init/watchApiToken.ts
   'Set the API token so the server binds a non-loopback interface and StartOS can reach it.': 9,
   // interfaces.ts

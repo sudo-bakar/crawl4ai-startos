@@ -59,14 +59,21 @@ Then:
     `chown -R appuser:appuser` targets in `main.ts`'s `fix-permissions`
     oneshot are still correct.
   - `/var/lib/crawl4ai/outputs` is still the persistent artifact path. Note:
-    Playwright Chromium is **not** mounted from the volume — it is baked into
-    the image at `/home/appuser/.cache/ms-playwright/`. Do NOT re-add a volume
-    mount at `/home/appuser/.cache`; it would shadow the baked-in binary and
-    break the web UI. Only re-introduce a cache mount if a future image stops
-    baking Chromium (and then prefer an oneshot running
-    `playwright install chromium` rather than masking the path).
+    the Playwright browsers are **not** mounted from the volume — they are
+    baked into the image at `/home/appuser/.cache/ms-playwright/`
+    (`chromium-<rev>` and `chromium_headless_shell-<rev>` since 0.9.2). Do NOT
+    re-add a volume mount at `/home/appuser/.cache`; it would shadow the
+    baked-in binaries and break the web UI. Only re-introduce a cache mount if
+    a future image stops baking them (and then prefer an oneshot running
+    `playwright install chromium` rather than masking the path). Verify both
+    binaries exist in a new image before bumping:
+
+    ```bash
+    docker run --rm --entrypoint sh unclecode/crawl4ai:<new-tag> \
+      -c 'ls /home/appuser/.cache/ms-playwright/'
+    ```
 - If those have changed, update `main.ts` (`CRAWL4AI_API_TOKEN` env var,
   mounts, oneshot chown targets) and `interfaces.ts` (port) accordingly.
 - Re-run `make` (which runs `tsc` and `start-cli s9pk pack`), install on a
   StartOS box, and exercise the [verification checklist from
-  CRAWL4AI_PLAN.md §6](../CRAWL4AI_PLAN.md) before publishing.
+  CRAWL4AI_PLAN.md §6](./CRAWL4AI_PLAN.md) before publishing.

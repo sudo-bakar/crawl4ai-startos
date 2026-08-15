@@ -46,11 +46,11 @@ export default {
     2: "L'interface web est prête",
     3: "L'interface web n'est pas prête",
     4: 'Définir le token API',
-    5: 'Génère ou rotate le token API Crawl4AI. Requis pour que le serveur se lie à une interface non-loopback afin que StartOS puisse l\'atteindre.',
+    5: "Génère ou rotate le token API Crawl4AI. Requis pour que le serveur se lie à une interface non-loopback afin que StartOS puisse l'atteindre.",
     6: 'Token API',
     7: 'Utilisez ce token comme `Authorization: Bearer <token>` sur chaque requête API. Le service redémarre automatiquement pour appliquer le nouveau token.',
     8: 'Token',
-    9: 'Définissez le token API pour que le serveur se lie à une interface non-loopback afin que StartOS puisse l\'atteindre.',
+    9: "Définissez le token API pour que le serveur se lie à une interface non-loopback afin que StartOS puisse l'atteindre.",
     10: 'Playground, API, moniteur et endpoints MCP sur un seul port HTTP.',
   },
 } satisfies Record<string, LangDict>

@@ -20,9 +20,16 @@ proxy. You get a single web address that serves:
 - `/mcp/sse` and `/mcp/ws` — Model Context Protocol endpoints for direct
   integration with tools like Claude Code.
 
-Crawled artifacts (screenshots, PDFs) persist across restarts in the `main`
-volume. The Playwright Chromium browser is bundled inside the Docker image,
-so it is available on every start with no download.
+The Playwright browsers are bundled inside the Docker image, so they are
+available on every start with no download.
+
+> **Screenshots and PDFs are temporary — download them right away.** When you
+> call `/screenshot` or `/pdf`, the server saves the file and hands you an
+> `artifact_id` to fetch it with. Crawl4AI deletes that file **one hour after
+> it is created**, and also deletes the oldest files if the store grows past
+> 2 GB. This is Crawl4AI's own behavior and there is currently no setting to
+> change it. If you want to keep an image or PDF, save it to your own computer
+> or another service; do not treat the server as storage.
 
 ## Getting set up
 
@@ -92,6 +99,10 @@ If your client cannot set HTTP headers, use the WebSocket transport instead.
 
 ## Limitations
 
+- Screenshots and PDFs are deleted one hour after they are created, and the
+  oldest are deleted if the store passes 2 GB. There is no setting to change
+  this. Download anything you want to keep as soon as you get its
+  `artifact_id`.
 - LLM provider credentials are not configurable in this package. The `/llm`
   endpoint, LLM extraction, and the `fit`, `bm25`, and `llm` modes of `/md`
   may fail without a provider key. Use `/md` with `{"f":"raw"}` for Markdown

@@ -33,6 +33,7 @@ Upstream project: <https://github.com/unclecode/crawl4ai>
 - [Dependencies](#dependencies)
 - [Limitations and Differences](#limitations-and-differences)
 - [What Is Unchanged from Upstream](#what-is-unchanged-from-upstream)
+- [License](#license)
 - [Contributing](#contributing)
 
 ---
@@ -55,25 +56,51 @@ package.
 
 | Volume | Subpath → Mount point | Purpose |
 |---|---|---|
-| `main` | `outputs` → `/var/lib/crawl4ai/outputs` | Screenshot / PDF artifact store (mode `0700`, `appuser`-owned) |
+| `main` | `outputs` → `/var/lib/crawl4ai/outputs` | Screenshot / PDF artifact store (mode `0700`, `appuser`-owned). **Upstream expires these — see below.** |
 | `main` | `store.json` (root of volume) | Package-internal JSON file holding the auto-generated API token |
 
-The Playwright Chromium binary is **baked into the Docker image** at
-`/home/appuser/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`
-(appuser-owned) and is deliberately **not** mounted as a volume. Mounting a
-volume subpath at `/home/appuser/.cache` would shadow that baked-in binary
-with an empty directory, causing `BrowserType.launch: Executable doesn't
-exist` and a gunicorn worker-boot failure. Since the image bundles Chromium,
-there is nothing to persist or re-download; it is present on every boot.
+**`outputs/` is a short-lived cache, not durable storage.** Upstream's
+`artifacts.py` treats it as a TTL'd, quota'd scratch directory, and this
+package does not change those defaults:
 
-The 0.9.1 image ships a regression: it bakes the full `chromium-1228` binary
-but Playwright in 0.9.1 looks for the separate `chromium_headless_shell-1228`
-binary, which upstream forgot to `playwright install`. This package patches
-the daemon's subcontainer rootfs before startup, symlinking the missing
-`chrome-headless-shell` path to the existing full Chromium binary (which
-accepts `--headless=new`). The symlink is created in `setupMain` on every
-boot — no volume or persisted state is involved. Remove this workaround when
-a fixed upstream image ships.
+| Upstream setting | Env override | Default |
+|---|---|---|
+| Artifact TTL | `CRAWL4AI_ARTIFACT_TTL_SECONDS` | `3600` (1 hour) |
+| Directory quota | `CRAWL4AI_ARTIFACT_QUOTA_BYTES` | 2 GiB |
+| Per-artifact size cap | `CRAWL4AI_MAX_ARTIFACT_BYTES` | 50 MiB |
+| Artifact directory | `CRAWL4AI_ARTIFACT_DIR` | `/var/lib/crawl4ai/outputs` |
+
+An artifact is deleted once it is older than the TTL, by whichever comes
+first: the janitor task (`server.py` `_artifact_janitor`, runs every 300 s) or
+the next `GET /artifacts/{id}` read, which unlinks an expired file and returns
+not-found. If the directory is still over quota after reaping expired files,
+the janitor deletes oldest-first. `/screenshot` and `/pdf` therefore return an
+`artifact_id` the caller is expected to fetch promptly — the volume mount
+survives restarts, but individual artifacts do not survive their TTL. Clients
+that need to keep an image or PDF must download and store it themselves.
+
+Because of that, the mount's real purpose is not long-term retention: it gives
+the artifact store a writable, correctly-owned directory that survives
+container rebuilds and keeps the 2 GiB quota off the container's ephemeral
+layer. Exposing the TTL as a StartOS config knob is tracked in `TODO.md`.
+
+The Playwright browsers are **baked into the Docker image** under
+`/home/appuser/.cache/ms-playwright/` — `chromium-<rev>/chrome-linux64/chrome`
+and
+`chromium_headless_shell-<rev>/chrome-headless-shell-linux64/chrome-headless-shell`,
+both appuser-owned — and are deliberately **not** mounted as a volume.
+Mounting a volume subpath at `/home/appuser/.cache` would shadow those
+baked-in binaries with an empty directory, causing `BrowserType.launch:
+Executable doesn't exist` and a gunicorn worker-boot failure. Since the image
+bundles both browsers, there is nothing to persist or re-download; they are
+present on every boot.
+
+The 0.9.1 image omitted `chrome-headless-shell` (Playwright's default launch
+target), and this package worked around it by symlinking the missing path to
+the full Chromium binary. Upstream fixed the image in 0.9.2 — its Dockerfile
+now copies `chromium_headless_shell-*` alongside `chromium-*` into appuser's
+cache — so the workaround was removed and `setupMain` no longer mutates the
+subcontainer rootfs.
 
 A `fix-permissions` oneshot runs as `root` before the main daemon starts on
 every start, restoring ownership of the mounted `outputs` subpath to
@@ -185,12 +212,19 @@ interface's dedicated external host:port serves it at root (`/mcp/sse`).
 
 ## Backups and Restore
 
-The entire `main` volume is backed up — that captures `outputs/`
-(screenshots / PDFs the user expects to keep) and `store.json` (the API token
-at the volume root, so a restored-from-backup install keeps the same token).
-The Playwright Chromium binary is **not** part of any volume: it lives in the
-Docker image's read-only layer, so it adds nothing to backup size and is
+The entire `main` volume is backed up — that captures `store.json` (the API
+token at the volume root, so a restored-from-backup install keeps the same
+token) and `outputs/`. Note that backing up `outputs/` is close to a no-op in
+practice: its contents expire after the upstream artifact TTL (1 hour by
+default), so a restore performed later than that recovers an empty or
+near-empty directory. The token is the part of this volume worth backing up.
+The Playwright browsers are **not** part of any volume: they live in the
+Docker image's read-only layer, so they add nothing to backup size and are
 restored automatically whenever the image is present.
+
+**Backup and restore have never been exercised on this package** — no backup
+target is configured on the development box. See `TODO.md`. Treat the token's
+survival across a restore as designed-for, not verified.
 
 ## Health Checks
 
@@ -229,6 +263,12 @@ None.
    the Crawl4AI logo — the StartOS icon embeds the upstream 32×32 PNG
    (`deploy/docker/static/assets/crawl4ai-logo.png`) inside an SVG
    `<image>`. There is no fabricated vector artwork.
+5. **Screenshot / PDF artifacts expire after 1 hour and the TTL is not
+   configurable.** This is upstream's default
+   (`CRAWL4AI_ARTIFACT_TTL_SECONDS=3600`), not a package choice, but the
+   package does not currently expose an override — so the `outputs/` volume
+   behaves as a short-lived cache regardless of how much disk the user has.
+   Callers must download artifacts promptly. Tracked in `TODO.md`.
 
 ## What Is Unchanged from Upstream
 
@@ -241,6 +281,14 @@ None.
 - The full REST API surface, playground, real-time monitor, and MCP endpoints
 - The 2 GB hard-minimum RAM requirement (enforced by upstream's own
   HEALTHCHECK and re-exposed here via the manifest)
+
+## License
+
+Apache-2.0 (see [`LICENSE`](./LICENSE)), per upstream.
+
+This product includes software developed by UncleCode
+(https://x.com/unclecode) as part of the Crawl4AI project
+(https://github.com/unclecode/crawl4ai).
 
 ## Contributing
 
@@ -258,7 +306,7 @@ architectures:
   - aarch64
 volumes:
   main: /var/lib/crawl4ai/outputs
-# Note: Playwright Chromium is baked into the image (not a mounted volume)
+# Note: Playwright browsers are baked into the image (not a mounted volume)
 ports:
   web: 11235
 dependencies: []

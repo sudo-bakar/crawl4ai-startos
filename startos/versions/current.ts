@@ -1,68 +1,43 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.9.1:2',
+  version: '0.9.2:0',
   releaseNotes: {
-    en_US: `Bumped the upstream image to \`unclecode/crawl4ai:0.9.1\` and patched two regressions. Fixes:
-- The 0.9.1 image bakes the full \`chromium-1228\` binary but Playwright in 0.9.1 looks for \`chromium_headless_shell-1228\`, which upstream forgot to \`playwright install\`. Without this, the FastAPI worker crashes at startup with \`BrowserType.launch: Executable doesn't exist\` and the service never reaches \`ready\`. This package now symlinks the missing path to the existing full Chromium binary (which accepts \`--headless=new\`), so crawls, the API, and MCP all work.
-- The 0.9.1 image bakes \`chromium-1228\` (not \`chromium-1223\`); the old docs referenced the wrong path.
-- The "Open" button now opens \`/playground\` directly. The \`/monitor\` UI page was renamed to \`/dashboard\` upstream; docs updated to match.
-- Redis no longer errors with \`Permission denied\` on every RDB save (background saving) — supervisord now passes \`--dir /var/lib/redis\`, so the snapshot lands in a writable directory the image pre-creates as \`appuser\`. Resolves the constant \`MISCONF Redis is configured to save RDB snapshots…\` log spam and the ~10 s SIGKILL wait on every stop.
-- Supervisord pidfile moved to \`/tmp/supervisord.pid\` (was CWD-relative \`/app/supervisord.pid\`, which \`appuser\` cannot write because the image makes \`/app\` read-only on purpose).
-- \`dashboard\`, \`playground\`, and \`/static\` now serve the UI shell through the auth gate without \`401\`, so they load through the StartOS reverse proxy without an \`Authorization\` header on the top-level navigation.
-- \`page_timeout\` is now interpreted in seconds (was milliseconds, effectively disabling HTTP-mode timeouts).
-- \`PruningContentFilter\` gained \`preserve_classes\` / \`preserve_tags\` (opt-in metadata whitelist).
-- Several smaller Docker reliability fixes: rate-limit Redis storage auth, FastAPI pinned below 0.137, browser context cleanup, \`lxml\` ceiling widened to allow 6.x.
+    en_US: `Bumped the upstream image to \`unclecode/crawl4ai:0.9.2\`, a maintenance release with no breaking changes. Fixes:
+- The image now ships Playwright's \`chrome-headless-shell\` binary, which 0.9.1 omitted. This package's symlink workaround for that regression has been removed — the real binary is used instead.
+- The playground's "Advanced Config" no longer fails with \`400\`; \`/config/dump\` requests now send the config \`type\` alongside the code.
+- The dashboard's monitor WebSocket (\`/monitor/ws\`) no longer fails with \`500\` under token auth; authentication is handled by the auth-gate middleware, and destructive monitor actions keep their admin-scope check.
+- Closing a streaming crawl mid-flight no longer leaks background tasks, browser contexts, and pages, which could produce stray \`TargetClosedError\`s on a later crawl.
 
-[Full upstream release notes](https://github.com/unclecode/crawl4ai/compare/v0.9.0...v0.9.1)`,
-    es_ES: `Actualizada la imagen upstream a \`unclecode/crawl4ai:0.9.1\` y parcheadas dos regresiones. Correcciones:
-- La imagen 0.9.1 incluye el binario completo \`chromium-1228\` pero Playwright en 0.9.1 busca \`chromium_headless_shell-1228\`, que upstream olvidó instalar con \`playwright install\`. Sin esto, el worker de FastAPI crashea al arrancar con \`BrowserType.launch: Executable doesn't exist\` y el servicio nunca alcanza el estado \`ready\`. Este paquete ahora crea un symlink desde la ruta faltante al binario completo de Chromium (que acepta \`--headless=new\`), por lo que los crawls, la API y MCP funcionan correctamente.
-- La imagen 0.9.1 incluye \`chromium-1228\` (no \`chromium-1223\`); la documentación anterior referenciaba la ruta incorrecta.
-- El botón "Open" ahora abre \`/playground\` directamente. La página UI \`/monitor\` fue renombrada a \`/dashboard\` upstream; la documentación fue actualizada para coincidir.
-- Redis ya no responde con \`Permission denied\` en cada guardado RDB (background saving) — supervisord ahora pasa \`--dir /var/lib/redis\`, por lo que la instantánea cae en un directorio escribible que la imagen pre-crea como \`appuser\`. Resuelve el spam constante en logs de \`MISCONF Redis is configured to save RDB snapshots…\` y la espera de ~10 s por SIGKILL en cada parada.
-- El pidfile de supervisord se trasladó a \`/tmp/supervisord.pid\` (antes relativo al CWD como \`/app/supervisord.pid\`, que \`appuser\` no podía escribir porque la imagen deja \`/app\` como solo lectura a propósito).
-- \`dashboard\`, \`playground\` y \`/static\` ahora sirven el shell de la UI a través del auth gate sin \`401\`, por lo que cargan a través del proxy inverso de StartOS sin un encabezado \`Authorization\` en la navegación de nivel superior.
-- \`page_timeout\` ahora se interpreta en segundos (antes en milisegundos, lo que en la práctica deshabilitaba los timeouts en modo HTTP).
-- \`PruningContentFilter\` ganó \`preserve_classes\` / \`preserve_tags\` (lista blanca de metadatos opcional).
-- Varias correcciones menores de confiabilidad de Docker: auth del almacenamiento Redis del rate limiter, FastAPI fijado por debajo de 0.137, limpieza del contexto del navegador, techo de \`lxml\` ampliado para permitir 6.x.
+[Full upstream release notes](https://github.com/unclecode/crawl4ai/releases/tag/v0.9.2)`,
+    es_ES: `Actualizada la imagen upstream a \`unclecode/crawl4ai:0.9.2\`, una versión de mantenimiento sin cambios incompatibles. Correcciones:
+- La imagen ahora incluye el binario \`chrome-headless-shell\` de Playwright, que 0.9.1 omitía. Se eliminó el symlink que este paquete usaba como solución temporal — ahora se usa el binario real.
+- La "Configuración avanzada" del playground ya no falla con \`400\`; las peticiones a \`/config/dump\` ahora envían el \`type\` de configuración junto con el código.
+- El WebSocket del monitor del dashboard (\`/monitor/ws\`) ya no falla con \`500\` bajo autenticación por token; la autenticación la gestiona el middleware del auth gate, y las acciones destructivas del monitor mantienen su comprobación de ámbito admin.
+- Cerrar un crawl en streaming a mitad de ejecución ya no deja tareas en segundo plano, contextos de navegador ni páginas colgadas, lo que podía producir \`TargetClosedError\` espurios en un crawl posterior.
 
-[Notas de la release upstream completas](https://github.com/unclecode/crawl4ai/compare/v0.9.0...v0.9.1)`,
-    de_DE: `Upstream-Image auf \`unclecode/crawl4ai:0.9.1\` angehoben und zwei Regressionen gepatched. Fehlerbehebungen:
-- Das 0.9.1-Image enthält das vollständige \`chromium-1228\`-Binary, aber Playwright in 0.9.1 sucht nach \`chromium_headless_shell-1228\`, das upstream vergessen hat, mit \`playwright install\` zu installieren. Ohne diesen Fix stürzt der FastAPI-Worker beim Start mit \`BrowserType.launch: Executable doesn't exist\` ab und der Dienst erreicht nie den Status \`ready\`. Dieses Paket erstellt nun einen Symlink vom fehlenden Pfad zum vorhandenen vollständigen Chromium-Binary (das \`--headless=new\` akzeptiert), sodass Crawls, API und MCP funktionieren.
-- Das 0.9.1-Image enthält \`chromium-1228\` (nicht \`chromium-1223\`); die alte Dokumentation verwies auf den falschen Pfad.
-- Der „Open"-Button öffnet nun direkt \`/playground\`. Die UI-Seite \`/monitor\` wurde upstream in \`/dashboard\` umbenannt; die Dokumentation wurde entsprechend angepasst.
-- Redis reagiert nicht mehr bei jedem RDB-Speichern (Background Saving) mit \`Permission denied\` — supervisord übergibt nun \`--dir /var/lib/redis\`, sodass der Snapshot in einem beschreibbaren Verzeichnis landet, das das Image als \`appuser\` vorab anlegt. Behebt das ständige \`MISCONF Redis is configured to save RDB snapshots…\`-Log-Spam und das ~10 s SIGKILL-Warten bei jedem Stopp.
-- Die supervisord-Pidfile wurde nach \`/tmp/supervisord.pid\` verschoben (zuvor CWD-relativ als \`/app/supervisord.pid\`, das \`appuser\` nicht schreiben konnte, weil das Image \`/app\` absichtlich schreibgeschützt hält).
-- \`dashboard\`, \`playground\` und \`/static\` liefern das UI-Gerüst jetzt durch das Auth-Gate ohne \`401\` aus, sodass sie über den StartOS-Reverse-Proxy ohne \`Authorization\`-Header bei der Top-Level-Navigation laden.
-- \`page_timeout\` wird jetzt in Sekunden interpretiert (vorher Millisekunden, was HTTP-Modus-Timeouts faktisch deaktivierte).
-- \`PruningContentFilter\` erhielt \`preserve_classes\` / \`preserve_tags\` (opt-in Metadaten-Whitelist).
-- Mehrere kleinere Docker-Zuverlässigkeitskorrekturen: Authentifizierung des Rate-Limiter-Redis-Storage, FastAPI unter 0.137 gepinnt, Browser-Kontext-Cleanup, \`lxml\`-Obergrenze erweitert für 6.x.
+[Notas de la release upstream completas](https://github.com/unclecode/crawl4ai/releases/tag/v0.9.2)`,
+    de_DE: `Upstream-Image auf \`unclecode/crawl4ai:0.9.2\` angehoben, ein Wartungsrelease ohne Breaking Changes. Fehlerbehebungen:
+- Das Image enthält jetzt Playwrights \`chrome-headless-shell\`-Binary, das in 0.9.1 fehlte. Der Symlink-Workaround dieses Pakets wurde entfernt — es wird nun das echte Binary verwendet.
+- Die „Erweiterte Konfiguration" des Playgrounds schlägt nicht mehr mit \`400\` fehl; \`/config/dump\`-Anfragen senden jetzt den Konfigurations-\`type\` zusammen mit dem Code.
+- Der Monitor-WebSocket des Dashboards (\`/monitor/ws\`) schlägt unter Token-Authentifizierung nicht mehr mit \`500\` fehl; die Authentifizierung übernimmt die Auth-Gate-Middleware, destruktive Monitor-Aktionen behalten ihre Admin-Scope-Prüfung.
+- Das Schließen eines laufenden Streaming-Crawls hinterlässt keine Hintergrund-Tasks, Browser-Kontexte und Seiten mehr, was bei einem späteren Crawl vereinzelt \`TargetClosedError\` verursachen konnte.
 
-[Vollständige Upstream-Release-Notes](https://github.com/unclecode/crawl4ai/compare/v0.9.0...v0.9.1)`,
-    pl_PL: `Zaktualizowano obraz upstream do \`unclecode/crawl4ai:0.9.1\` i załatano dwie regresje. Poprawki:
-- Obraz 0.9.1 zawiera pełne binarium \`chromium-1228\`, ale Playwright w 0.9.1 szuka \`chromium_headless_shell-1228\`, które upstream zapomniał zainstalować przez \`playwright install\`. Bez tej poprawki worker FastAPI wysypuje się przy starcie z \`BrowserType.launch: Executable doesn't exist\` i usługa nigdy nie osiąga statusu \`ready\`. Ten pakiet tworzy teraz symlink z brakującej ścieżki do istniejącego pełnego binarium Chromium (które akceptuje \`--headless=new\`), dzięki czemu crawle, API i MCP działają.
-- Obraz 0.9.1 zawiera \`chromium-1228\` (nie \`chromium-1223\`); poprzednia dokumentacja wskazywała błędną ścieżkę.
-- Przycisk „Open" otwiera teraz bezpośrednio \`/playground\`. Strona UI \`/monitor\` została upstream przemianowana na \`/dashboard\`; dokumentacja została zaktualizowana, aby to odzwierciedlać.
-- Redis nie zwraca już \`Permission denied\` przy każdym zapisie RDB (background saving) — supervisord przekazuje teraz \`--dir /var/lib/redis\`, więc snapshot trafia do katalogu z prawem zapisu, który obraz wstępnie tworzy jako \`appuser\`. Rozwiązuje ciągły spam w logach \`MISCONF Redis is configured to save RDB snapshots…\` oraz ~10 s oczekiwania na SIGKILL przy każdym zatrzymaniu.
-- Plik pidfile supervisorda przeniesiono do \`/tmp/supervisord.pid\` (wcześniej względem CWD jako \`/app/supervisord.pid\`, którego \`appuser\` nie mógł zapisać, ponieważ obraz celowo czyni \`/app\` tylko do odczytu).
-- \`dashboard\`, \`playground\` i \`/static\` teraz serwują szkielet UI przez auth gate bez \`401\`, więc ładują się przez odwrotny proxy StartOS bez nagłówka \`Authorization\` w nawigacji najwyższego poziomu.
-- \`page_timeout\` jest teraz interpretowany w sekundach (wcześniej w milisekundach, co w praktyce wyłączało timeouty w trybie HTTP).
-- \`PruningContentFilter\` zyskał \`preserve_classes\` / \`preserve_tags\` (opcjonalna biała lista metadanych).
-- Kilka mniejszych poprawek niezawodności Dockera: auth magazynu Redis rate-limita, FastAPI przypięte poniżej 0.137, czyszczenie kontekstu przeglądarki, górny limit \`lxml\` rozszerzony o 6.x.
+[Vollständige Upstream-Release-Notes](https://github.com/unclecode/crawl4ai/releases/tag/v0.9.2)`,
+    pl_PL: `Zaktualizowano obraz upstream do \`unclecode/crawl4ai:0.9.2\`, wydania konserwacyjnego bez zmian łamiących zgodność. Poprawki:
+- Obraz zawiera teraz binarium \`chrome-headless-shell\` Playwrighta, którego brakowało w 0.9.1. Obejście z symlinkiem stosowane przez ten pakiet zostało usunięte — używane jest prawdziwe binarium.
+- „Zaawansowana konfiguracja" w playgroundzie nie zwraca już \`400\`; żądania do \`/config/dump\` przesyłają teraz \`type\` konfiguracji razem z kodem.
+- WebSocket monitora w dashboardzie (\`/monitor/ws\`) nie zwraca już \`500\` przy uwierzytelnianiu tokenem; uwierzytelnianie obsługuje middleware auth gate, a destrukcyjne akcje monitora zachowują sprawdzanie zakresu admin.
+- Zamknięcie strumieniowego crawla w trakcie działania nie pozostawia już zadań w tle, kontekstów przeglądarki ani stron, co mogło powodować przypadkowe \`TargetClosedError\` przy kolejnym crawlu.
 
-[Pełne notatki wydania upstream](https://github.com/unclecode/crawl4ai/compare/v0.9.0...v0.9.1)`,
-    fr_FR: `Image amont mise à niveau vers \`unclecode/crawl4ai:0.9.1\` et correction de deux régressions. Corrections :
-- L'image 0.9.1 intègre le binaire complet \`chromium-1228\` mais Playwright en 0.9.1 cherche \`chromium_headless_shell-1228\`, qu'upstream a oublié d'installer via \`playwright install\`. Sans cela, le worker FastAPI se bloque au démarrage avec \`BrowserType.launch: Executable doesn't exist\` et le service n'atteint jamais l'état \`ready\`. Ce paquet crée maintenant un symlink du chemin manquant vers le binaire Chromium complet existant (qui accepte \`--headless=new\`), afin que les crawls, l'API et MCP fonctionnent.
-- L'image 0.9.1 intègre \`chromium-1228\` (et non \`chromium-1223\`) ; l'ancienne documentation indiquait le mauvais chemin.
-- Le bouton « Open » ouvre désormais directement \`/playground\`. La page UI \`/monitor\` a été renommée en \`/dashboard\` côté upstream ; la documentation a été mise à jour en conséquence.
-- Redis ne renvoie plus \`Permission denied\` à chaque sauvegarde RDB (background saving) — supervisord passe désormais \`--dir /var/lib/redis\`, donc le snapshot atterrit dans un répertoire inscriptible que l'image pré-crée pour \`appuser\`. Résout le spam continu dans les logs \`MISCONF Redis is configured to save RDB snapshots…\` et l'attente de ~10 s SIGKILL à chaque arrêt.
-- Le pidfile supervisord a été déplacé vers \`/tmp/supervisord.pid\` (auparavant relatif au CWD comme \`/app/supervisord.pid\`, que \`appuser\` ne pouvait pas écrire car l'image rend \`/app\` intentionnellement en lecture seule).
-- \`dashboard\`, \`playground\` et \`/static\` servent désormais la coque UI à travers le portail d'auth sans \`401\`, donc ils se chargent à travers le proxy inverse StartOS sans en-tête \`Authorization\` sur la navigation de premier niveau.
-- \`page_timeout\` est désormais interprété en secondes (auparavant en millisecondes, ce qui désactivait en pratique les timeouts en mode HTTP).
-- \`PruningContentFilter\` a gagné \`preserve_classes\` / \`preserve_tags\` (liste blanche de métadonnées optionnelle).
-- Plusieurs corrections mineures de fiabilité Docker : auth du stockage Redis du rate limiter, FastAPI épinglé sous 0.137, nettoyage du contexte du navigateur, plafond \`lxml\` élargi pour permettre 6.x.
+[Pełne notatki wydania upstream](https://github.com/unclecode/crawl4ai/releases/tag/v0.9.2)`,
+    fr_FR: `Image amont mise à niveau vers \`unclecode/crawl4ai:0.9.2\`, une version de maintenance sans changement incompatible. Corrections :
+- L'image intègre désormais le binaire \`chrome-headless-shell\` de Playwright, absent en 0.9.1. Le contournement par symlink de ce paquet a été supprimé — le vrai binaire est utilisé.
+- La « Configuration avancée » du playground ne renvoie plus \`400\` ; les requêtes \`/config/dump\` envoient maintenant le \`type\` de configuration avec le code.
+- Le WebSocket du moniteur du dashboard (\`/monitor/ws\`) ne renvoie plus \`500\` avec l'authentification par jeton ; l'authentification est assurée par le middleware du portail d'auth, et les actions destructrices du moniteur conservent leur contrôle de portée admin.
+- Fermer un crawl en streaming en cours ne laisse plus de tâches d'arrière-plan, de contextes de navigateur ni de pages actifs, ce qui pouvait produire des \`TargetClosedError\` parasites lors d'un crawl ultérieur.
 
-[Notes de version amont complètes](https://github.com/unclecode/crawl4ai/compare/v0.9.0...v0.9.1)`,
+[Notes de version amont complètes](https://github.com/unclecode/crawl4ai/releases/tag/v0.9.2)`,
   },
   migrations: {
     up: async ({ effects }) => {},

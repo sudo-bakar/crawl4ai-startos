@@ -6,58 +6,68 @@ and were deliberately postponed.
 
 ## Pending verification
 
-- [ ] Install on a real StartOS box and exercise the §6 checklist in
-      `../CRAWL4AI_PLAN.md` (token critical task surfaces, health passes,
-      `/playground` loads, `/crawl` POST returns a successful crawl with the
-      bearer token, `/health` reachable without auth, `/dashboard` loads,
-      restart preserves `outputs/`, backup → uninstall → restore
-      preserves artifacts). Per AGENTS.md, a clean `tsc` + `s9pk pack` does
-      NOT prove the service runs.
+- [ ] **Backup → uninstall → restore has never been exercised.** Blocked on
+      this box: `start-cli backup target list` returns `{}` (no backup target
+      configured), so a backup cannot be created. Run this once a target
+      exists and confirm `outputs/` artifacts and the stored API token in
+      `store.json` survive the round trip.
+
+## Verified (kept as evidence, not pending work)
+
+- [x] **Verified on 0.9.2:0** (StartOS 0.4.0.1, x86_64):
+      in-place update from `0.9.1:2` completed; `/health` returns
+      `{"status":"ok","version":"0.9.2"}` unauthenticated; **Set API Token**
+      action returns a token and the daemon restarts onto it (`/hooks/info`
+      → `200` with the Bearer header); a real `/crawl` of `https://example.com`
+      succeeded (proves Playwright launches); `/screenshot` wrote an artifact
+      to `outputs/`; a service restart preserved both the artifact and the
+      token; MCP SSE completed a full `initialize` + `tools/list` round trip
+      through the StartOS proxy (7 tools) — `initialize` →
+      `notifications/initialized` → `tools/list` over `/mcp/sse` with a Bearer
+      header, each POST answered on the open GET stream, `401` without a
+      token. Per AGENTS.md, a clean `tsc` + `s9pk pack` does NOT prove the
+      service runs — these are runtime observations.
+- [x] **Verified 0.9.2 upstream fixes on the box:** `/config/dump` returns
+      `200` with `{"type": …, "code": …}` and `400` without `type` (the
+      playground "Advanced Config" fix), and `/monitor/ws` upgrades with
+      `101 Switching Protocols` using `?token=` (`403` without) — the
+      router-level `token_dep` 500 is gone.
+- [x] **Verified the 0.9.1 headless-shell workaround is obsolete.** The
+      running 0.9.2 container has a real 189 MB
+      `chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell`
+      (not a symlink), and no `Executable doesn't exist` appears in the logs.
+      The `setupMain` symlink patch was removed — do not reintroduce it.
 - [x] **Verified:** `appuser` is UID `999` / GID `999` (system user, created
       with `-r`). `PYTHON_ENV=production` is baked into the image. The
       `fix-permissions` oneshot chowns by name (`appuser:appuser`) so the
       numeric UID never affects correctness — keep that.
 - [x] **Resolved:** the `cache` volume mount was removed in `0.9.0:1`.
       Mounting `/home/appuser/.cache` shadowed the baked-in Playwright
-      Chromium binary and broke the web UI. Chromium is now served from the
-      image's read-only layer on every boot, so it adds nothing to backup
-      size — the backup-bloat concern that used to be tracked here no longer
-      applies.
+      browsers and broke the web UI. They are now served from the image's
+      read-only layer on every boot, so they add nothing to backup size — the
+      backup-bloat concern that used to be tracked here no longer applies.
 
 ## Future v2 work
 
-- [ ] **MCP SSE transport behind the StartOS proxy — needs runtime verification.**
-      An end-to-end MCP handshake (`initialize` → `tools/list` over the GET SSE
-      stream, JSON-RPC POST to `/mcp/messages/?session_id=…` answered on the
-      GET stream) has NOT been exercised through the StartOS reverse proxy.
-      Code-only findings so far (verified against
-      `unclecode/crawl4ai:0.9.0`, `mcp` Python SDK, and the Rust hyper proxy in
-      `start-core/src/net/http.rs`):
-        - gunicorn runs `--workers 1` (supervisord.conf). The "session
-          affinity broken across workers" theory is FALSE.
-        - The MCP SDK pops the session from its in-memory dict the instant the
-          GET `/mcp/sse` stream closes (`sse.py` `finally`). The `404 "Could
-          not find session"` seen in two-step curl probes (GET → close → POST)
-          is therefore a **test artifact**, not a server bug.
-        - The proxy streams response bodies through unbuffered (`box_incoming`)
-          and does not kill active streams (`header_read_timeout` is disarmed
-          while a body/upgrade is in flight). Its HTTP/1.1 path uses a single
-          shared upstream `SendRequest` guarded by a `Mutex`; whether a client
-          that reuses one TCP connection for the GET stream and the POST could
-          stall under that single-connection serialization has not been
-          reproduced with a real client.
-      Action when a StartOS box and a working MCP client (Hermes/SSE, or a WS
-      client) are available: run `curl -v` against `/mcp/sse` to record the
-      negotiated HTTP version, confirm `?token=` → `401` and Bearer → `200`,
-      then drive a full `initialize` + `tools/list` round trip and confirm the
-      responses actually arrive over the SSE stream inside the client's timeout.
-      If a real client (e.g. Hermes) still times out with a correct Bearer
-      header, capture the proxy→upstream HTTP version and connection reuse.
 - [ ] Track upstream for a streamable-HTTP `/mcp` endpoint. As of crawl4ai
       `main`, `mcp_bridge.attach_mcp` mounts only `/mcp/sse` (SSE) and `/mcp/ws`
       (WebSocket) — there is no streamable-HTTP transport. If/when upstream adds
       one, recommend it as the primary MCP transport: request/response over a
       single connection avoids the SSE dual-flow fragility entirely.
+- [ ] Expose the artifact TTL / quota as StartOS configuration. Upstream's
+      `artifacts.py` treats `/var/lib/crawl4ai/outputs` as a TTL'd cache:
+      `CRAWL4AI_ARTIFACT_TTL_SECONDS` (default `3600`),
+      `CRAWL4AI_ARTIFACT_QUOTA_BYTES` (2 GiB), `CRAWL4AI_MAX_ARTIFACT_BYTES`
+      (50 MiB). A janitor (`server.py` `_artifact_janitor`, every 300 s) and
+      `resolve_artifact` on read both unlink expired files. The package pins
+      none of these, so screenshots/PDFs vanish after an hour regardless of
+      available disk — which makes backing up `outputs/` near-pointless and
+      surprised a verification run (an artifact written 8 h earlier was gone,
+      initially mistaken for reinstall data loss). All three are plain env
+      vars, so this is a store-backed action plus a spill into the daemon
+      `env` in `main.ts`, mirroring how `CRAWL4AI_API_TOKEN` is handled.
+      Update `README.md` §Volume and Data Layout and `instructions.md` when
+      done.
 - [ ] LLM-provider API-key config action(s). Add a config action (or several)
       that lets the user paste `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
       `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `TOGETHER_API_KEY`,

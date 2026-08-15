@@ -13,7 +13,7 @@ export const manifest = setupManifest({
   volumes: ['main'],
   images: {
     crawl4ai: {
-      source: { dockerTag: 'unclecode/crawl4ai:0.9.1' },
+      source: { dockerTag: 'unclecode/crawl4ai:0.9.2' },
       arch: ['x86_64', 'aarch64'],
     },
   },

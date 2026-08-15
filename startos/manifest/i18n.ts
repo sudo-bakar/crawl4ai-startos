@@ -8,7 +8,7 @@ export const short = {
   pl_PL:
     'Przyjazny dla LLM-ów crawler z wbudowanym API HTTP, playgroundem i endpointami MCP.',
   fr_FR:
-    "Récupérateur web pensé pour les LLM avec API HTTP, playground et endpoints MCP intégrés.",
+    'Récupérateur web pensé pour les LLM avec API HTTP, playground et endpoints MCP intégrés.',
 }
 
 export const long = {

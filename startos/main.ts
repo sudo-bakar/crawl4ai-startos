@@ -1,4 +1,3 @@
-import { mkdir, symlink, unlink } from 'node:fs/promises'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 import { storeJson } from './fileModels/store.json'
@@ -13,14 +12,15 @@ export const main = sdk.setupMain(async ({ effects }) => {
   // trigger the rebuild, leaving the running container on the old token.)
   const apiToken = await storeJson.read((s) => s.apiToken).const(effects)
 
-  // The Playwright Chromium binary is baked into the 0.9.1 image at
-  // /home/appuser/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome
-  // (appuser-owned). Mounting the `cache` volume subpath at
-  // /home/appuser/.cache would shadow that baked-in binary with an empty
+  // The Playwright browsers are baked into the image under
+  // /home/appuser/.cache/ms-playwright/ (chromium-<rev>/chrome-linux64/chrome
+  // and chromium_headless_shell-<rev>/chrome-headless-shell-linux64/chrome-headless-shell,
+  // both appuser-owned). Mounting the `cache` volume subpath at
+  // /home/appuser/.cache would shadow those baked-in binaries with an empty
   // directory, causing `BrowserType.launch: Executable doesn't exist` and a
   // worker-boot failure — the web UI never came up. Only the artifact store
-  // (outputs) is mounted; the baked-in Chromium survives every boot with no
-  // need to persist or re-download it.
+  // (outputs) is mounted; the baked-in browsers survive every boot with no
+  // need to persist or re-download them.
   const mounts = sdk.Mounts.of().mountVolume({
     volumeId: 'main',
     subpath: 'outputs',
@@ -28,29 +28,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
     readonly: false,
   })
 
-  // The 0.9.1 image bakes the full Chromium binary (chromium-1228) but
-  // Playwright in 0.9.1 looks for the separate chrome-headless-shell-1228
-  // binary, which upstream forgot to `playwright install` in the image.
-  // Without this workaround, gunicorn's UvicornWorker crashes during FastAPI
-  // startup with `BrowserType.launch: Executable doesn't exist at
-  // .../chrome-headless-shell` and supervisord restarts it forever — the
-  // service never reaches `ready`. The full Chromium binary accepts
-  // --headless=new, so a symlink from the expected path to the existing
-  // binary is sufficient. Remove this workaround when a fixed image ships.
-  const crawl4aiSub = await sdk.SubContainer.eager(
-    effects,
-    { imageId: 'crawl4ai' },
-    mounts,
-    'crawl4ai-sub',
-  )
-  const headlessShellDir = `${crawl4aiSub.rootfs}/home/appuser/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64`
-  await mkdir(headlessShellDir, { recursive: true })
-  await unlink(`${headlessShellDir}/chrome-headless-shell`).catch(() => {})
-  await symlink(
-    '/home/appuser/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome',
-    `${headlessShellDir}/chrome-headless-shell`,
-  )
-
+  // 0.9.1 shipped without the chrome-headless-shell binary Playwright looks
+  // for, and this package symlinked it to the full Chromium binary. Upstream
+  // fixed the image in 0.9.2 (the Dockerfile now copies
+  // chromium_headless_shell-* alongside chromium-* into appuser's cache), so
+  // the workaround is gone and no rootfs mutation is needed here.
   return (
     sdk.Daemons.of(effects)
       // Re-chown the mounted `outputs` subpath to appuser before the server
@@ -77,7 +59,12 @@ export const main = sdk.setupMain(async ({ effects }) => {
         requires: [],
       })
       .addDaemon('crawl4ai', {
-        subcontainer: crawl4aiSub,
+        subcontainer: sdk.SubContainer.of(
+          effects,
+          { imageId: 'crawl4ai' },
+          mounts,
+          'crawl4ai-sub',
+        ),
         exec: {
           // Run the image's bundled CMD (`bash entrypoint.sh`), which resolves
           // the gunicorn bind based on CRAWL4AI_API_TOKEN, then execs

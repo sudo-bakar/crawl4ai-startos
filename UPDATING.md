@@ -75,5 +75,5 @@ Then:
 - If those have changed, update `main.ts` (`CRAWL4AI_API_TOKEN` env var,
   mounts, oneshot chown targets) and `interfaces.ts` (port) accordingly.
 - Re-run `make` (which runs `tsc` and `start-cli s9pk pack`), install on a
-  StartOS box, and exercise the [verification checklist from
-  CRAWL4AI_PLAN.md §6](./CRAWL4AI_PLAN.md) before publishing.
+  StartOS box, and exercise the verification checklist in `TODO.md` before
+  publishing.

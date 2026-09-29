@@ -114,6 +114,8 @@ soon as you have its id, and do not treat the server as storage.
   provider.
 - **`/execute_js` and crawl hooks are turned off** and return an error. The
   `/hooks/info` endpoint still works.
+- **A crawl is cancelled after five minutes** and fails with a timeout instead
+  of returning partial results. Split large jobs into smaller ones.
 - **The playground and monitor load their interface from Cloudflare's CDN and
   Google Fonts.** They will not render on a device without internet access, and
   opening them tells those providers you did. The API is unaffected.

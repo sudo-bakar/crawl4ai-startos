@@ -57,3 +57,5 @@ changes.
   mounting a volume at that path.
 - Check whether the artifact TTL and quota defaults moved; `README.md` and
   `instructions.md` both state them, and both are user-visible promises.
+- Check whether the per-crawl `limits.wall_clock_s` default moved; `README.md`
+  and `instructions.md` state the current 5-minute limit.

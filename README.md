@@ -225,7 +225,12 @@ layers and are never part of a backup.
 4. **Artifacts expire after an hour and the limit cannot be changed.** That is
    upstream's default; the package exposes no override, so screenshots and PDFs
    must be downloaded promptly.
-5. **The playground and monitor are not self-contained, and load third-party
+5. **A crawl is cancelled after five minutes.** Upstream's default per-request
+   deadline (`limits.wall_clock_s`) is 300 seconds, and a request that exceeds
+   it fails with a `504` instead of returning partial results. Synchronous
+   requests and background jobs share the same handler, so both are subject to
+   it. Larger jobs have to be split.
+6. **The playground and monitor are not self-contained, and load third-party
    scripts with no integrity pinning.** Upstream builds both pages from
    CodeMirror, highlight.js and clipboard.js on `cdnjs.cloudflare.com`,
    Tailwind's runtime compiler on `cdn.tailwindcss.com`, and a webfont from
@@ -239,7 +244,7 @@ layers and are never part of a backup.
    access to it. The package cannot correct this without replacing upstream's
    HTML. The REST and MCP surfaces are unaffected — nothing outside the browser
    touches a CDN.
-6. **The icon is a local rendering.** Upstream publishes no vector form of its
+7. **The icon is a local rendering.** Upstream publishes no vector form of its
    logo, so `icon.svg` is drawn to match rather than taken from the project.
 
 ---
